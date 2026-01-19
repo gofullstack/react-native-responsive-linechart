@@ -14,7 +14,7 @@ import { ChartContextProvider } from './ChartContext'
 import { calculateDataDimensions, calculateViewportDomain } from './Chart.utils'
 import { scalePointToDimensions } from './utils'
 
-type Props = {
+export interface ChartProps extends React.PropsWithChildren {
   /** All styling can be used except for padding. If you need padding, use the explicit `padding` prop below.*/
   style?: ViewStyle
   /** Data to be used by `<Area />` or `<Line />` children. Not required, and can be overridden in Area or Line components. */
@@ -37,9 +37,9 @@ export type ChartHandle = {
   setViewportOrigin: (origin: XYValue) => void
 }
 
-const Chart: React.FC<Props> = React.memo(
-  React.forwardRef<ChartHandle, Props>((props, ref) => {
-    const { style, children, data = [], padding, xDomain, yDomain, viewport, disableGestures, disableTouch } = deepmerge(computeDefaultProps(props), props)
+const Chart: React.FC<ChartProps> = React.memo(
+  React.forwardRef<ChartHandle, ChartProps>(({ children, ...props }, ref) => {
+    const { style, data = [], padding, xDomain, yDomain, viewport, disableGestures, disableTouch } = deepmerge(computeDefaultProps(props), props)    
     const { dimensions, onLayout } = useComponentDimensions()
     const dataDimensions = calculateDataDimensions(dimensions, padding)
 
@@ -207,7 +207,7 @@ const Chart: React.FC<Props> = React.memo(
 
 export { Chart }
 
-const computeDefaultProps = (props: Props) => {
+const computeDefaultProps = (props: ChartProps) => {
   const { data = [] } = props
 
   const xDomain = props.xDomain ?? {

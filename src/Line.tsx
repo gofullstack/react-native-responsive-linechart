@@ -7,6 +7,8 @@ import { adjustPointsForThickStroke, calculateTooltipIndex } from './Line.utils'
 import { ChartDataPoint, Smoothing, Stroke, Shape } from './types'
 import { scalePointsToDimensions, svgPath } from './utils'
 
+import type { TooltipProps } from './Tooltip.tsx'
+
 type Props = {
   /** Theme for the line */
   theme?: {
@@ -20,7 +22,7 @@ type Props = {
   /** Only works in combination with smoothing='bezier'. Value between 0 and 1. */
   tension?: number
   /** Component to render tooltips. An example component is included: <Tooltip />. */
-  tooltipComponent?: JSX.Element
+  tooltipComponent?: React.ReactElement<TooltipProps>
   /** Callback method that fires when a tooltip is displayed for a data point. */
   onTooltipSelect?: (value: ChartDataPoint, index: number) => void
   /** Callback method that fires when the user stopped touching the chart. */
@@ -39,13 +41,12 @@ export type LineHandle = {
   setTooltipIndex: (index: number | undefined) => void
 }
 
-const Line = React.forwardRef<LineHandle, Props>(function Line(props, ref) {
+const Line = React.forwardRef<LineHandle, Props>(function Line({tooltipComponent, ...props}, ref) {  
   const { data: contextData, dimensions, viewportDomain, viewportOrigin, lastTouch } = React.useContext(ChartContext)
   const [tooltipIndex, setTooltipIndex] = React.useState<number | undefined>(props.initialTooltipIndex)
 
   const {
     theme: { stroke, scatter },
-    tooltipComponent,
     data = contextData,
     tension,
     smoothing,
@@ -78,7 +79,7 @@ const Line = React.forwardRef<LineHandle, Props>(function Line(props, ref) {
     const scaledPoints = scalePointsToDimensions(data, viewportDomain, dimensions)
     const newIndex = calculateTooltipIndex(scaledPoints, lastTouch?.position)
 
-    let tooltipTimer: NodeJS.Timeout
+    let tooltipTimer: number
 
     if (lastTouch?.type === 'panEnd') {
       if (hideTooltipOnDragEnd && Math.abs(lastTouch?.translation?.x) > 5) {

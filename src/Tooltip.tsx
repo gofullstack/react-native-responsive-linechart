@@ -4,7 +4,7 @@ import { Text, Rect } from 'react-native-svg'
 import ChartContext from './ChartContext'
 import { ChartDataPoint, Label, XYValue, Shape } from './types'
 
-type Props = {
+export type TooltipProps = {
   theme?: {
     label?: Label
     shape?: Shape
@@ -14,7 +14,7 @@ type Props = {
   position?: XYValue
 }
 
-const Tooltip: React.FC<Props> = (props) => {
+const Tooltip: React.FC<TooltipProps> = (props) => {
   const { dimensions } = React.useContext(ChartContext)
 
   const {

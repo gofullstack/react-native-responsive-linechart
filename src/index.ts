@@ -1,4 +1,4 @@
-export { Chart } from './Chart'
+export { Chart, type ChartProps } from './Chart'
 export { HorizontalAxis } from './HorizontalAxis'
 export { VerticalAxis } from './VerticalAxis'
 export { Line } from './Line'

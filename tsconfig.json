@@ -1,15 +1,12 @@
 {
+  "extends": "@react-native/typescript-config",
   "compilerOptions": {
-    "target": "es5",
-    "module": "commonjs",
+    "noEmit": false,
     "declaration": true,
     "outDir": "./lib",
     "jsx": "react",
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "strict": true,
     "typeRoots": ["node_modules/@types"],
-    "skipLibCheck": true
+    "allowImportingTsExtensions": false
   },
   "include": ["src"],
   "exclude": ["node_modules", "**/__tests__/*"]
