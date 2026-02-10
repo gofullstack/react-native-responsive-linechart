@@ -1,12 +1,11 @@
 import * as React from 'react'
 import deepmerge from 'deepmerge'
-import { Animated, NativeSyntheticEvent, View, ViewStyle } from 'react-native'
-import { TapGestureHandler, PanGestureHandler, State, GestureHandlerRootView } from 'react-native-gesture-handler'
+import { Animated, View, ViewStyle } from 'react-native'
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler'
 import fastEqual from 'fast-deep-equal/react'
 import clamp from 'lodash.clamp'
 import minBy from 'lodash.minby'
 import maxBy from 'lodash.maxby'
-import debounce from 'lodash.debounce'
 import Svg, { G, Mask, Defs, Rect } from 'react-native-svg'
 import { useComponentDimensions } from './useComponentDimensions'
 import { AxisDomain, ChartDataPoint, Padding, ViewPort, TouchEvent, XYValue } from './types'
@@ -43,8 +42,18 @@ const Chart: React.FC<ChartProps> = React.memo(
     const { dimensions, onLayout } = useComponentDimensions()
     const dataDimensions = calculateDataDimensions(dimensions, padding)
 
-    const tapGesture = React.createRef() // declared within constructor
-    const panGesture = React.createRef()
+    const panStartRef = React.useRef({ x: 0, y: 0 })
+    const panHandlerRef = React.useRef<{
+      dataDimensions?: ReturnType<typeof calculateDataDimensions>
+      viewport?: ViewPort
+      xDomain?: AxisDomain
+      yDomain?: AxisDomain
+      padding?: Padding
+      offset?: Animated.ValueXY
+      setPanX?: (x: number) => void
+      setPanY?: (y: number) => void
+      setLastTouch?: (t: TouchEvent) => void
+    }>({})
 
     const [lastTouch, setLastTouch] = React.useState<TouchEvent | undefined>(undefined)
     const [panX, setPanX] = React.useState<number>(viewport.initialOrigin.x)
@@ -71,134 +80,125 @@ const Chart: React.FC<ChartProps> = React.memo(
 
     React.useImperativeHandle(ref, () => ({ setViewportOrigin }))
 
-    const handleTouchEvent = React.useCallback(
-      debounce(
-        (x: number, y: number) => {
-          if (dataDimensions) {
-            setLastTouch({
-              position: {
-                x: clamp(x - padding.left, 0, dataDimensions.width),
-                y: clamp(y - padding.top, 0, dataDimensions.height),
-              },
-              type: 'tap',
-            })
-          }
-
-          return true
-        },
-        300,
-        { leading: true, trailing: false }
-      ),
-      [JSON.stringify(dataDimensions)]
-    )
-
-    const handlePanEvent = (evt: NativeSyntheticEvent<any>) => {
-      if (dataDimensions) {
-        const factorX = viewport.size.width / dataDimensions.width
-        setPanX((offset.x as any)._value - evt.nativeEvent.translationX * factorX)
-
-        const factorY = viewport.size.height / dataDimensions.height
-        setPanY((offset.y as any)._value + evt.nativeEvent.translationY * factorY)
-
-        if (evt.nativeEvent.state === State.END) {
-          offset.x.setValue(clamp((offset.x as any)._value - evt.nativeEvent.translationX * factorX, xDomain.min, xDomain.max - viewport.size.width))
-          offset.y.setValue(clamp((offset.y as any)._value + evt.nativeEvent.translationY * factorY, yDomain.min, yDomain.max - viewport.size.height))
-          setLastTouch({
-            position: {
-              x: clamp(evt.nativeEvent.x - padding.left, 0, dataDimensions.width),
-              y: clamp(evt.nativeEvent.y - padding.top, 0, dataDimensions.height),
-            },
-            translation: {
-              x: evt.nativeEvent.translationX,
-              y: evt.nativeEvent.translationY,
-            },
-            type: 'panEnd',
-          })
-        } else {
-          setLastTouch({
-            position: {
-              x: clamp(evt.nativeEvent.x - padding.left, 0, dataDimensions.width),
-              y: clamp(evt.nativeEvent.y - padding.top, 0, dataDimensions.height),
-            },
-            translation: {
-              x: evt.nativeEvent.translationX,
-              y: evt.nativeEvent.translationY,
-            },
-            type: 'pan',
-          })
-        }
-      }
-      return true
+    panHandlerRef.current = {
+      dataDimensions,
+      viewport,
+      xDomain,
+      yDomain,
+      padding,
+      offset,
+      setPanX,
+      setPanY,
+      setLastTouch,
     }
 
-    const _onTouchGestureEvent = Animated.event<any>([{ nativeEvent: {} }], {
-      useNativeDriver: true,
-      listener: (evt) => {
-        // Necessary to debounce function, see https://medium.com/trabe/react-syntheticevent-reuse-889cd52981b6
-        if (evt.nativeEvent.state === State.ACTIVE) {
-          handleTouchEvent(evt.nativeEvent.x, evt.nativeEvent.y)
-        }
-      },
-    })
-
-    const _onPanGestureEvent = Animated.event<any>([{ nativeEvent: {} }], {
-      useNativeDriver: true,
-      listener: handlePanEvent,
-    })
+    const composedPanGesture = React.useMemo(() => {
+      return Gesture.Pan()
+        .activeOffsetX([-5, 5])
+        .failOffsetY([-8, 8])
+        .minPointers(1)
+        .runOnJS(true)
+        .onStart(() => {
+          const h = panHandlerRef.current
+          if (h.offset) {
+            panStartRef.current.x = (h.offset.x as any)._value
+            panStartRef.current.y = (h.offset.y as any)._value
+          }
+        })
+        .onUpdate((e: { translationX: number; translationY: number; x: number; y: number }) => {
+          const h = panHandlerRef.current
+          if (!h.dataDimensions) return
+          const factorX = h.viewport!.size.width / h.dataDimensions.width
+          const factorY = h.viewport!.size.height / h.dataDimensions.height
+          const newX = panStartRef.current.x - e.translationX * factorX
+          const newY = panStartRef.current.y + e.translationY * factorY
+          h.setPanX?.(newX)
+          h.setPanY?.(newY)
+          h.setLastTouch?.({
+            position: {
+              x: clamp(e.x - (h.padding?.left ?? 0), 0, h.dataDimensions.width),
+              y: clamp(e.y - (h.padding?.top ?? 0), 0, h.dataDimensions.height),
+            },
+            translation: { x: e.translationX, y: e.translationY },
+            type: 'pan',
+          })
+        })
+        .onEnd((e: { translationX: number; translationY: number; x: number; y: number }) => {
+          const h = panHandlerRef.current
+          if (!h.dataDimensions) return
+          const factorX = h.viewport!.size.width / h.dataDimensions.width
+          const factorY = h.viewport!.size.height / h.dataDimensions.height
+          const newX = clamp(
+            panStartRef.current.x - e.translationX * factorX,
+            h.xDomain!.min,
+            h.xDomain!.max - h.viewport!.size.width
+          )
+          const newY = clamp(
+            panStartRef.current.y + e.translationY * factorY,
+            h.yDomain!.min,
+            h.yDomain!.max - h.viewport!.size.height
+          )
+          h.offset?.x.setValue(newX)
+          h.offset?.y.setValue(newY)
+          h.setPanX?.(newX)
+          h.setPanY?.(newY)
+          h.setLastTouch?.({
+            position: {
+              x: clamp(e.x - (h.padding?.left ?? 0), 0, h.dataDimensions.width),
+              y: clamp(e.y - (h.padding?.top ?? 0), 0, h.dataDimensions.height),
+            },
+            translation: { x: e.translationX, y: e.translationY },
+            type: 'panEnd',
+          })
+        })
+    }, [])
 
     const childComponents = React.Children.toArray(children)
     // undefined because ForwardRef (Line) has name undefined
     const lineAndAreaComponents = childComponents.filter((c) => ['Area', undefined].includes((c as any)?.type?.name))
     const otherComponents = childComponents.filter((c) => !['Area', undefined].includes((c as any)?.type?.name))
 
+    const innerChart =
+      dimensions &&
+      dataDimensions && (
+        <View style={{ width: dimensions.width, height: dimensions.height }}>
+          <ChartContextProvider
+            value={{
+              data,
+              dimensions: dataDimensions,
+              domain: { x: xDomain, y: yDomain },
+              viewportDomain,
+              viewportOrigin: scalePointToDimensions(
+                { x: viewportDomain.x.min, y: viewportDomain.y.max },
+                viewportDomain,
+                dataDimensions
+              ),
+              viewport,
+              lastTouch,
+            }}
+          >
+            <Svg width={dimensions.width} height={dimensions.height}>
+              <G translateX={padding.left} translateY={padding.top}>
+                {otherComponents}
+                <Defs>
+                  <Mask id="Mask" x={0} y={0} width={dataDimensions.width} height={dataDimensions.height}>
+                    <Rect x="0" y="0" width={dataDimensions.width} height={dataDimensions.height} fill="#ffffff" />
+                  </Mask>
+                </Defs>
+                {lineAndAreaComponents}
+              </G>
+            </Svg>
+          </ChartContextProvider>
+        </View>
+      )
+
+    const chartContent =
+      dimensions &&
+      (disableGestures ? innerChart : <GestureDetector gesture={composedPanGesture}>{innerChart}</GestureDetector>)
+
     return (
       <View style={style} onLayout={onLayout}>
-        <GestureHandlerRootView>
-          {!!dimensions && (
-            <TapGestureHandler enabled={!disableTouch} onHandlerStateChange={_onTouchGestureEvent} ref={tapGesture}>
-              <Animated.View style={{ width: dimensions.width, height: dimensions.height }}>
-                <PanGestureHandler
-                  enabled={!disableGestures}
-                  minDeltaX={10}
-                  minDeltaY={10}
-                  onGestureEvent={_onPanGestureEvent}
-                  onHandlerStateChange={_onPanGestureEvent}
-                  ref={panGesture}
-                >
-                  <Animated.View style={{ width: dimensions.width, height: dimensions.height }}>
-                    <ChartContextProvider
-                      value={{
-                        data,
-                        dimensions: dataDimensions,
-                        domain: {
-                          x: xDomain,
-                          y: yDomain,
-                        },
-                        viewportDomain,
-                        viewportOrigin: scalePointToDimensions({ x: viewportDomain.x.min, y: viewportDomain.y.max }, viewportDomain, dataDimensions),
-                        viewport,
-                        lastTouch,
-                      }}
-                    >
-                      <Svg width={dimensions.width} height={dimensions.height}>
-                        <G translateX={padding.left} translateY={padding.top}>
-                          {otherComponents}
-                          <Defs>
-                            {/* Mask to fix viewport overflow bugs */}
-                            <Mask id="Mask" x={0} y={0} width={dataDimensions.width} height={dataDimensions.height}>
-                              <Rect x="0" y="0" width={dataDimensions.width} height={dataDimensions.height} fill="#ffffff" />
-                            </Mask>
-                          </Defs>
-                          {lineAndAreaComponents}
-                        </G>
-                      </Svg>
-                    </ChartContextProvider>
-                  </Animated.View>
-                </PanGestureHandler>
-              </Animated.View>
-            </TapGestureHandler>
-          )}
-        </GestureHandlerRootView>
+        <GestureHandlerRootView>{chartContent}</GestureHandlerRootView>
       </View>
     )
   }),
